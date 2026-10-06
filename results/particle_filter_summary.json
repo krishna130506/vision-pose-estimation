@@ -1,0 +1,27 @@
+{
+  "phase": 4,
+  "n_samples": 100,
+  "particles": 2000,
+  "iterations": 8,
+  "ann_topk": 5,
+  "pixel_sigma_px": 2.0,
+  "visibility_log_penalty": 3.0,
+  "ann": {
+    "position_mean_error_m": 5.016677874383916,
+    "position_median_error_m": 5.136941762556475,
+    "position_p90_error_m": 7.284604204888446,
+    "roll_mean_error_deg": 4.108499999999999,
+    "roll_median_error_deg": 3.6915999999999993
+  },
+  "particle_filter": {
+    "position_mean_error_m": 0.17930271851080892,
+    "position_median_error_m": 0.11994059607547279,
+    "position_p90_error_m": 0.3323887786010036,
+    "roll_mean_error_deg": 0.4141811694309474,
+    "roll_median_error_deg": 0.06921221871159666
+  },
+  "improvement_percent": {
+    "position_mean": 96.42586741663519,
+    "roll_mean": 89.91892005766222
+  }
+}

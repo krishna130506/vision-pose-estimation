@@ -1,0 +1,46 @@
+{
+  "val_loss": 1.4356738959418403,
+  "top1": 0.6285416666666667,
+  "top5": 0.9301736111111111,
+  "neighbourhood": {
+    "top1_exact": 0.6285416666666667,
+    "within_1_bin_all_dims": 0.9902777777777778,
+    "within_2_bins_all_dims": 0.9976041666666666,
+    "per_dim_exact_x": 0.91625,
+    "per_dim_within1_x": 0.9995833333333334,
+    "per_dim_exact_y": 0.8788888888888889,
+    "per_dim_within1_y": 0.9984027777777778,
+    "per_dim_exact_z": 0.8247569444444445,
+    "per_dim_within1_z": 0.9951388888888889,
+    "per_dim_exact_phi": 0.9200347222222223,
+    "per_dim_within1_phi": 0.9964236111111111
+  },
+  "physical": {
+    "predicted_class_centre": {
+      "pos_median_m": 5.531813785212052,
+      "pos_mean_m": 5.778760432049114,
+      "pos_p90_m": 8.770901088737522,
+      "roll_median_deg": 3.83985,
+      "roll_mean_deg": 4.161031111111111
+    },
+    "perfect_classifier_centre": {
+      "pos_median_m": 5.078501163727102,
+      "pos_mean_m": 5.073864103096391,
+      "pos_p90_m": 7.515913638394522,
+      "roll_median_deg": 3.7433500000000004,
+      "roll_mean_deg": 3.7386870694444445
+    }
+  },
+  "best_epoch": 57,
+  "args": {
+    "epochs": 60,
+    "batch_size": 256,
+    "lr": 0.001,
+    "hidden": 100,
+    "val_fraction": 0.2,
+    "no_lr_decay": false,
+    "seed": 42
+  },
+  "n_train": 115200,
+  "n_val": 28800
+}

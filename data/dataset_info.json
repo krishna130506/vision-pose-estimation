@@ -1,0 +1,170 @@
+{
+  "csv": "pose_dataset.csv",
+  "num_classes": 4800,
+  "feature_columns": [
+    "feature_1_x",
+    "feature_1_y",
+    "feature_1_occlusion",
+    "feature_2_x",
+    "feature_2_y",
+    "feature_2_occlusion",
+    "feature_3_x",
+    "feature_3_y",
+    "feature_3_occlusion",
+    "feature_4_x",
+    "feature_4_y",
+    "feature_4_occlusion",
+    "feature_5_x",
+    "feature_5_y",
+    "feature_5_occlusion",
+    "feature_6_x",
+    "feature_6_y",
+    "feature_6_occlusion",
+    "feature_7_x",
+    "feature_7_y",
+    "feature_7_occlusion",
+    "feature_8_x",
+    "feature_8_y",
+    "feature_8_occlusion",
+    "feature_9_x",
+    "feature_9_y",
+    "feature_9_occlusion",
+    "feature_10_x",
+    "feature_10_y",
+    "feature_10_occlusion",
+    "feature_11_x",
+    "feature_11_y",
+    "feature_11_occlusion",
+    "feature_12_x",
+    "feature_12_y",
+    "feature_12_occlusion",
+    "feature_13_x",
+    "feature_13_y",
+    "feature_13_occlusion",
+    "feature_14_x",
+    "feature_14_y",
+    "feature_14_occlusion"
+  ],
+  "bins": {
+    "x": [
+      -100.0,
+      50.0,
+      10
+    ],
+    "y": [
+      -50.0,
+      50.0,
+      10
+    ],
+    "z": [
+      -20.0,
+      20.0,
+      8
+    ],
+    "phi_deg": [
+      -45.0,
+      45.0,
+      6
+    ]
+  },
+  "class_formula": "((ix*N_Y+iy)*N_Z+iz)*N_PHI+ir",
+  "image": {
+    "width": 1280,
+    "height": 960,
+    "focal_px": 1500.0,
+    "cx": 640.0,
+    "cy": 480.0
+  },
+  "pixel_noise_std": 0.5,
+  "dropout_prob": 0.02,
+  "samples_per_class": 30,
+  "seed": 42,
+  "feature_names": [
+    "nose_tip",
+    "tail_exhaust",
+    "left_wingtip",
+    "right_wingtip",
+    "fin_tip",
+    "left_stab_tip",
+    "right_stab_tip",
+    "canopy_top",
+    "left_wing_mid",
+    "right_wing_mid",
+    "left_wing_store",
+    "right_wing_store",
+    "intake_lip",
+    "ventral_fin"
+  ],
+  "features_xyz_m": [
+    [
+      7.5,
+      0.0,
+      0.0
+    ],
+    [
+      -7.5,
+      0.0,
+      0.2
+    ],
+    [
+      -1.5,
+      5.0,
+      0.0
+    ],
+    [
+      -1.5,
+      -5.0,
+      0.0
+    ],
+    [
+      -5.5,
+      0.0,
+      3.5
+    ],
+    [
+      -6.5,
+      2.8,
+      0.0
+    ],
+    [
+      -6.5,
+      -2.8,
+      0.0
+    ],
+    [
+      2.5,
+      0.0,
+      1.4
+    ],
+    [
+      0.5,
+      2.2,
+      0.0
+    ],
+    [
+      0.5,
+      -2.2,
+      0.0
+    ],
+    [
+      0.5,
+      3.5,
+      -0.5
+    ],
+    [
+      0.5,
+      -3.5,
+      -0.5
+    ],
+    [
+      3.0,
+      0.0,
+      -0.9
+    ],
+    [
+      -4.5,
+      0.0,
+      -1.2
+    ]
+  ]
+}

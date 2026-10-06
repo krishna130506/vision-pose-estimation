@@ -1,0 +1,45 @@
+{
+  "phase": 5,
+  "input_file": "C:\\Users\\krish\\OneDrive\\Desktop\\vision_pose_estimation\\results\\ann_vs_particle_filter.csv",
+  "n_samples": 100,
+  "position": {
+    "ann_mean": 5.016677874383916,
+    "pf_mean": 0.1793027185108089,
+    "ann_median": 5.136941762556475,
+    "pf_median": 0.11994059607547275,
+    "ann_p90": 7.284604204888446,
+    "pf_p90": 0.3323887786010036,
+    "mean_reduction_percent": 96.42586741663519,
+    "median_reduction_percent": 97.66513615260877,
+    "p90_reduction_percent": 95.4371058570629,
+    "samples_pf_better": 99,
+    "samples_ann_better": 1,
+    "samples_equal": 0
+  },
+  "roll": {
+    "ann_mean": 4.108499999999999,
+    "pf_mean": 0.4141811694309472,
+    "ann_median": 3.6915999999999993,
+    "pf_median": 0.06921221871159661,
+    "ann_p90": 6.360479999999998,
+    "pf_p90": 0.1727840646817995,
+    "mean_reduction_percent": 89.91892005766223,
+    "median_reduction_percent": 98.12514306231454,
+    "p90_reduction_percent": 97.28347444403882,
+    "samples_pf_better": 98,
+    "samples_ann_better": 2,
+    "samples_equal": 0
+  },
+  "paired_results": {
+    "position_mean_delta_m": 4.837375155873107,
+    "position_median_delta_m": 4.984995922093758,
+    "roll_mean_delta_deg": 3.6943188305690517,
+    "roll_median_delta_deg": 3.6323387514774392,
+    "position_pf_better_fraction": 0.99,
+    "roll_pf_better_fraction": 0.98
+  },
+  "interpretation": {
+    "primary_comparison": "ANN class-centre estimate versus continuous pose obtained after particle-filter refinement.",
+    "important_caveat": "The particle filter uses the same synthetic camera, aircraft geometry, visibility model, and projection model used to generate the observations. Therefore the PF result demonstrates model-based refinement under the project's synthetic observation model; it is not an independent real-world benchmark."
+  }
+}
