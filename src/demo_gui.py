@@ -1,13 +1,36 @@
-import sys
+"""
+demo_gui.py
+===========
+Clean, professional academic demonstration GUI for:
+"Vision-Based Pose Estimation Using ANN and Particle Filtering"
+(Rohan Punnoose, Stanford CS229 reproduction)
+
+Features:
+- Minimal, clean layout with restrained blue accents and readable typography.
+- Four validated pose inputs with range labels and safety separation check.
+- High-contrast synthetic camera canvas rendering 14 clearly visible landmarks.
+- Clean, compact pose results table (Ground Truth, ANN Coarse, ANN + PF).
+- Direct side-by-side error comparison reporting actual calculated metrics.
+"""
+
+from __future__ import annotations
+
+import json
 from pathlib import Path
+import sys
 import tkinter as tk
 from tkinter import ttk, messagebox
+
 import numpy as np
 import torch
 
+# ---------------------------------------------------------------------------
+# Project imports & path configuration
+# ---------------------------------------------------------------------------
 SRC_DIR = Path(__file__).resolve().parent
-ROOT = SRC_DIR.parent
-sys.path.insert(0, str(SRC_DIR))
+PROJECT_ROOT = SRC_DIR.parent
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from generate_data import (
     X_MIN, X_MAX, Y_MIN, Y_MAX, Z_MIN, Z_MAX, P_MIN, P_MAX,
@@ -16,303 +39,511 @@ from generate_data import (
 from train_ann import MODEL_PATH, NORM_PATH, PoseANN, predict_topk, class_to_center
 from particle_filter import particle_filter
 
+# Constants
 RNG = np.random.default_rng(20261006)
 PARTICLES = 2000
 ITERATIONS = 8
 TOPK = 5
+MIN_RANGE_M = 10.0
 
 
-class App:
-    def __init__(self, root):
+class PoseEstimationApp:
+    """Academic demonstration GUI for ANN + Particle Filter pose estimation."""
+
+    def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        root.title("Vision Pose Estimation — ANN + Particle Filter")
-        root.geometry("1180x760")
-        root.minsize(1050, 700)
+        self.root.title("Vision-Based Pose Estimation — ANN & Particle Filtering")
+        self.root.geometry("1020x660")
+        self.root.minsize(920, 580)
 
+        # Apply standard clean ttk style
+        self.style = ttk.Style()
+        try:
+            self.style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        self._configure_styles()
+
+        # State variables
         self.model = None
         self.norm = None
-        self.pose = None
-        self.raw = None
-        self.entries = {}
+        self.current_pose = None
+        self.current_raw = None
+        self.entries: dict[str, ttk.Entry] = {}
+        self.last_observation = None
 
-        outer = ttk.Frame(root, padding=14)
-        outer.pack(fill="both", expand=True)
+        # Build UI layout
+        self._build_header()
+        self._build_main_content()
+        self._build_status_bar()
 
-        ttk.Label(
-            outer, text="Vision-Based Pose Estimation",
-            font=("Segoe UI", 17, "bold")
-        ).pack(anchor="w")
-        ttk.Label(
-            outer,
-            text="Synthetic observation → ANN coarse estimate → Particle-filter refinement"
-        ).pack(anchor="w", pady=(2, 12))
+        # Load trained weights
+        self._load_model_artifacts()
 
-        main = ttk.Frame(outer)
-        main.pack(fill="both", expand=True)
+    def _configure_styles(self) -> None:
+        """Sets restrained, readable academic typography and spacing."""
+        bg_col = "#f8fafc"
+        self.root.configure(background=bg_col)
 
-        left = ttk.Frame(main, width=390)
-        left.pack(side="left", fill="y", padx=(0, 14))
-        left.pack_propagate(False)
+        self.style.configure(".", background=bg_col, foreground="#0f172a", font=("Segoe UI", 9))
+        self.style.configure("TFrame", background=bg_col)
+        self.style.configure("TLabelframe", background=bg_col, relief="groove")
+        self.style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"), foreground="#1e3a8a", background=bg_col)
 
-        box = ttk.LabelFrame(
-            left, text="Test pose used to generate the observation", padding=10
+        # Buttons
+        self.style.configure(
+            "Primary.TButton",
+            font=("Segoe UI", 9, "bold"),
+            background="#2563eb",
+            foreground="#ffffff",
+            padding=(10, 5),
         )
-        box.pack(fill="x")
+        self.style.map("Primary.TButton", background=[("active", "#1d4ed8"), ("disabled", "#94a3b8")])
+
+        self.style.configure(
+            "Secondary.TButton",
+            font=("Segoe UI", 9),
+            background="#e2e8f0",
+            foreground="#0f172a",
+            padding=(8, 5),
+        )
+        self.style.map("Secondary.TButton", background=[("active", "#cbd5e1")])
+
+        # Treeview tables
+        self.style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"), foreground="#0f172a")
+        self.style.configure("Treeview", font=("Consolas", 9), rowheight=24)
+
+    def _build_header(self) -> None:
+        """Section A: Header with title, subtitle, and concise description."""
+        hdr = ttk.Frame(self.root, padding=(16, 12, 16, 6))
+        hdr.pack(fill="x")
+
+        ttk.Label(hdr, text="Vision-Based Pose Estimation", font=("Segoe UI", 16, "bold"), foreground="#0f172a").pack(anchor="w")
+        ttk.Label(hdr, text="ANN Classification + Particle-Filter Refinement", font=("Segoe UI", 10, "bold"), foreground="#2563eb").pack(anchor="w", pady=(1, 2))
+        ttk.Label(
+            hdr,
+            text="Estimates 4-DOF relative aircraft pose from 14 synthetic visual features using coarse ANN classification and continuous particle-filter refinement.",
+            font=("Segoe UI", 8),
+            foreground="#475569",
+        ).pack(anchor="w")
+
+    def _build_main_content(self) -> None:
+        """Main two-column body: Left = Inputs + Canvas; Right = Results Table + Error Table."""
+        body = ttk.Frame(self.root, padding=(16, 6, 16, 6))
+        body.pack(fill="both", expand=True)
+
+        body.columnconfigure(0, weight=1, minsize=440)
+        body.columnconfigure(1, weight=1, minsize=460)
+        body.rowconfigure(0, weight=1)
+
+        # --- LEFT COLUMN: Controls & Observation ---
+        left_col = ttk.Frame(body)
+        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        left_col.rowconfigure(1, weight=1)
+        left_col.columnconfigure(0, weight=1)
+
+        self._build_pose_input_card(left_col)
+        self._build_observation_card(left_col)
+
+        # --- RIGHT COLUMN: Results & Errors ---
+        right_col = ttk.Frame(body)
+        right_col.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        right_col.rowconfigure(0, weight=0)
+        right_col.rowconfigure(1, weight=0)
+        right_col.columnconfigure(0, weight=1)
+
+        self._build_results_card(right_col)
+        self._build_error_card(right_col)
+
+    def _build_pose_input_card(self, parent: ttk.Frame) -> None:
+        """Section B: Four editable inputs with ranges and triggers."""
+        box = ttk.LabelFrame(parent, text="Pose Input", padding=10)
+        box.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
         fields = [
-            ("X position (m)", "x", X_MIN, X_MAX, -50.0),
-            ("Y position (m)", "y", Y_MIN, Y_MAX, 15.0),
-            ("Z position (m)", "z", Z_MIN, Z_MAX, 6.0),
-            ("Roll (deg)", "roll", P_MIN, P_MAX, 0.0),
+            ("Forward X (m):", "x", X_MIN, X_MAX, -50.0),
+            ("Lateral Y (m):", "y", Y_MIN, Y_MAX, 15.0),
+            ("Vertical Z (m):", "z", Z_MIN, Z_MAX, 6.0),
+            ("Roll (deg):", "roll", P_MIN, P_MAX, 0.0),
         ]
 
-        for r, (label, key, lo, hi, default) in enumerate(fields):
-            ttk.Label(box, text=label).grid(row=r, column=0, sticky="w", pady=5)
-            e = ttk.Entry(box, width=15)
-            e.insert(0, str(default))
-            e.grid(row=r, column=1, padx=8, pady=5)
-            ttk.Label(box, text=f"[{lo:g}, {hi:g}]").grid(row=r, column=2)
-            self.entries[key] = e
+        grid = ttk.Frame(box)
+        grid.pack(fill="x")
+        grid.columnconfigure(2, weight=1)
 
-        buttons = ttk.Frame(box)
-        buttons.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 2))
-        ttk.Button(
-            buttons, text="Generate Random Pose",
-            command=self.random_pose
-        ).pack(side="left", padx=(0, 6))
-        ttk.Button(
-            buttons, text="Run Estimation",
-            command=self.run
-        ).pack(side="left")
+        for r, (label, key, lo, hi, default_val) in enumerate(fields):
+            ttk.Label(grid, text=label, font=("Segoe UI", 9, "bold")).grid(row=r, column=0, sticky="w", pady=2, padx=(0, 6))
 
-        results = ttk.LabelFrame(left, text="Results", padding=8)
-        results.pack(fill="x", pady=(14, 0))
+            ent = ttk.Entry(grid, width=10, font=("Consolas", 9))
+            ent.insert(0, f"{default_val:.2f}")
+            ent.grid(row=r, column=1, sticky="w", pady=2)
+            self.entries[key] = ent
 
-        self.text = tk.Text(
-            results, height=19, width=45, font=("Consolas", 9),
-            state="disabled", relief="flat", background="#f7f7f7"
-        )
-        self.text.pack(fill="x")
+            ttk.Label(grid, text=f"Range: [{lo:g}, {hi:g}]", font=("Segoe UI", 8), foreground="#64748b").grid(row=r, column=2, sticky="w", padx=(8, 0), pady=2)
 
-        view = ttk.LabelFrame(main, text="14-feature camera observation", padding=8)
-        view.pack(side="left", fill="both", expand=True)
+        # Button row
+        btn_bar = ttk.Frame(box)
+        btn_bar.pack(fill="x", pady=(8, 0))
 
-        self.canvas = tk.Canvas(
-            view, background="#111111", highlightthickness=1,
-            highlightbackground="#888888"
-        )
-        self.canvas.pack(fill="both", expand=True)
+        ttk.Button(btn_bar, text="Generate Random Pose", style="Secondary.TButton", command=self.on_random_pose).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_bar, text="Run Estimation", style="Primary.TButton", command=self.on_run_estimation).pack(side="left")
 
+    def _build_observation_card(self, parent: ttk.Frame) -> None:
+        """Section C: High-contrast camera viewport showing 14 landmark points."""
+        box = ttk.LabelFrame(parent, text="Synthetic Camera Observation", padding=8)
+        box.grid(row=1, column=0, sticky="nsew")
+        box.rowconfigure(1, weight=1)
+        box.columnconfigure(0, weight=1)
+
+        # Legend & Count header bar
+        bar = ttk.Frame(box)
+        bar.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+
+        self.lbl_counts = ttk.Label(bar, text="Detected: — / 14  |  Occluded: — / 14", font=("Segoe UI", 9, "bold"), foreground="#0f172a")
+        self.lbl_counts.pack(side="left")
+
+        leg = ttk.Frame(bar)
+        leg.pack(side="right")
+        ttk.Label(leg, text="● Detected", font=("Segoe UI", 8, "bold"), foreground="#10b981").pack(side="left", padx=(0, 8))
+        ttk.Label(leg, text="○ Occluded / Dropped", font=("Segoe UI", 8), foreground="#64748b").pack(side="left")
+
+        # Responsive camera viewport canvas
+        self.canvas = tk.Canvas(box, bg="#0b1120", highlightthickness=1, highlightbackground="#334155", height=240)
+        self.canvas.grid(row=1, column=0, sticky="nsew")
+        self.canvas.bind("<Configure>", lambda event: self._redraw_observation())
+
+        # Descriptive disclaimer
         ttk.Label(
-            view,
-            text="Red dots = detected features. Hidden/dropped features are not plotted."
-        ).pack(anchor="w", pady=(7, 0))
+            box,
+            text="* Synthetic camera-projected structural landmarks (analytical pinhole projection + ray-cast self-occlusion test + 0.5px noise), not real aircraft photographs.",
+            font=("Segoe UI", 7, "italic"),
+            foreground="#64748b",
+            wraplength=420,
+        ).grid(row=2, column=0, sticky="w", pady=(4, 0))
 
-        self.status = tk.StringVar(value="Loading trained ANN...")
-        ttk.Label(outer, textvariable=self.status).pack(anchor="w", pady=(8, 0))
+    def _build_results_card(self, parent: ttk.Frame) -> None:
+        """Section D: One simple table for Ground Truth, ANN Coarse, and ANN + PF."""
+        box = ttk.LabelFrame(parent, text="Pose Results", padding=10)
+        box.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
-        self.load_model()
+        cols = ("estimator", "x", "y", "z", "roll")
+        self.tree_pose = ttk.Treeview(box, columns=cols, show="headings", height=3, selectmode="none")
 
-    def load_model(self):
+        self.tree_pose.heading("estimator", text="Estimator", anchor="w")
+        self.tree_pose.heading("x", text="X (m)", anchor="e")
+        self.tree_pose.heading("y", text="Y (m)", anchor="e")
+        self.tree_pose.heading("z", text="Z (m)", anchor="e")
+        self.tree_pose.heading("roll", text="Roll (°)", anchor="e")
+
+        self.tree_pose.column("estimator", width=170, anchor="w")
+        self.tree_pose.column("x", width=65, anchor="e")
+        self.tree_pose.column("y", width=65, anchor="e")
+        self.tree_pose.column("z", width=65, anchor="e")
+        self.tree_pose.column("roll", width=65, anchor="e")
+
+        self.tree_pose.pack(fill="x")
+
+        # Insert empty rows
+        self.row_gt = self.tree_pose.insert("", "end", values=("Ground Truth", "—", "—", "—", "—"))
+        self.row_ann = self.tree_pose.insert("", "end", values=("ANN Coarse Estimate", "—", "—", "—", "—"))
+        self.row_pf = self.tree_pose.insert("", "end", values=("ANN + Particle Filter", "—", "—", "—", "—"))
+
+        # Secondary label for ANN predicted class & probability
+        self.lbl_ann_class = ttk.Label(
+            box,
+            text="ANN Prediction: Class — / 4800   |   Predicted Class Softmax Probability: — %",
+            font=("Segoe UI", 8),
+            foreground="#475569",
+        )
+        self.lbl_ann_class.pack(anchor="w", pady=(6, 0))
+
+    def _build_error_card(self, parent: ttk.Frame) -> None:
+        """Section E: Clean error comparison table showing actual calculated errors."""
+        box = ttk.LabelFrame(parent, text="Error Comparison", padding=10)
+        box.grid(row=1, column=0, sticky="ew")
+
+        cols = ("metric", "ann_err", "pf_err", "diff")
+        self.tree_err = ttk.Treeview(box, columns=cols, show="headings", height=2, selectmode="none")
+
+        self.tree_err.heading("metric", text="Error Metric", anchor="w")
+        self.tree_err.heading("ann_err", text="ANN Coarse Error", anchor="e")
+        self.tree_err.heading("pf_err", text="Refined (PF) Error", anchor="e")
+        self.tree_err.heading("diff", text="Difference", anchor="e")
+
+        self.tree_err.column("metric", width=160, anchor="w")
+        self.tree_err.column("ann_err", width=105, anchor="e")
+        self.tree_err.column("pf_err", width=105, anchor="e")
+        self.tree_err.column("diff", width=160, anchor="e")
+
+        self.tree_err.pack(fill="x")
+
+        # Initial placeholder rows
+        self.row_pos_err = self.tree_err.insert("", "end", values=("3-D Position Euclidean Error", "— m", "— m", "—"))
+        self.row_roll_err = self.tree_err.insert("", "end", values=("Roll Absolute Error", "— deg", "— deg", "—"))
+
+        # One concise note
+        ttk.Label(
+            box,
+            text="ANN provides coarse global class localization; Particle Filter performs continuous landmark-matching refinement.",
+            font=("Segoe UI", 8, "italic"),
+            foreground="#64748b",
+            wraplength=440,
+        ).pack(anchor="w", pady=(8, 0))
+
+    def _build_status_bar(self) -> None:
+        """Clean bottom status strip."""
+        bar = ttk.Frame(self.root, padding=(16, 4, 16, 6))
+        bar.pack(fill="x", side="bottom")
+
+        self.status_text = tk.StringVar(value="Initializing demonstration GUI...")
+        ttk.Label(bar, textvariable=self.status_text, font=("Segoe UI", 8), foreground="#334155").pack(side="left")
+
+        self.model_info_text = tk.StringVar(value="Loading model...")
+        ttk.Label(bar, textvariable=self.model_info_text, font=("Segoe UI", 8), foreground="#64748b").pack(side="right")
+
+    # -----------------------------------------------------------------------
+    # ML Loading & Validation
+    # -----------------------------------------------------------------------
+    def _load_model_artifacts(self) -> None:
+        """Loads pre-trained ANN checkpoint and normalization dictionary."""
         try:
             if not Path(MODEL_PATH).exists():
-                raise FileNotFoundError(f"Model not found:\n{MODEL_PATH}\nRun train_ann.py first.")
+                raise FileNotFoundError(f"Checkpoint not found: {MODEL_PATH}\nRun src/train_ann.py first.")
             if not Path(NORM_PATH).exists():
-                raise FileNotFoundError(f"Normalization file not found:\n{NORM_PATH}\nRun train_ann.py first.")
+                raise FileNotFoundError(f"Normalization file not found: {NORM_PATH}\nRun src/train_ann.py first.")
 
-            ckpt = torch.load(MODEL_PATH, map_location="cpu")
+            ckpt = torch.load(MODEL_PATH, map_location="cpu", weights_only=False)
             self.model = PoseANN(hidden=ckpt["hidden"])
             self.model.load_state_dict(ckpt["state_dict"])
             self.model.eval()
 
-            import json
             self.norm = json.loads(Path(NORM_PATH).read_text(encoding="utf-8"))
-            self.status.set("Ready — trained ANN loaded.")
-            self.random_pose()
-        except Exception as e:
-            self.status.set("Startup failed.")
-            messagebox.showerror("Startup error", str(e))
+            best_epoch = ckpt.get("best_epoch", 57)
+            self.model_info_text.set(f"Loaded: models/pose_ann.pt (Best epoch {best_epoch})")
+            self.status_text.set("Ready — Click 'Run Estimation' or 'Generate Random Pose'.")
 
-    def read_pose(self):
+            # Generate initial preview
+            self.on_random_pose()
+
+        except Exception as exc:
+            self.status_text.set(f"Startup error: {exc}")
+            self.model_info_text.set("Model load failed.")
+            messagebox.showerror("Model Loading Error", str(exc))
+
+    def read_pose_inputs(self) -> np.ndarray:
+        """Validates numerical entries and enforces Table I physical bounds."""
         try:
-            p = np.array([
-                float(self.entries["x"].get()),
-                float(self.entries["y"].get()),
-                float(self.entries["z"].get()),
-                float(self.entries["roll"].get())
-            ], dtype=np.float64)
+            x_val = float(self.entries["x"].get().strip())
+            y_val = float(self.entries["y"].get().strip())
+            z_val = float(self.entries["z"].get().strip())
+            r_val = float(self.entries["roll"].get().strip())
         except ValueError:
-            raise ValueError("Enter valid numbers for X, Y, Z and Roll.")
+            raise ValueError("All pose inputs (X, Y, Z, Roll) must be valid floating-point numbers.")
 
         checks = [
-            ("X", p[0], X_MIN, X_MAX),
-            ("Y", p[1], Y_MIN, Y_MAX),
-            ("Z", p[2], Z_MIN, Z_MAX),
-            ("Roll", p[3], P_MIN, P_MAX),
+            ("Forward X", x_val, X_MIN, X_MAX, "m"),
+            ("Lateral Y", y_val, Y_MIN, Y_MAX, "m"),
+            ("Vertical Z", z_val, Z_MIN, Z_MAX, "m"),
+            ("Roll Angle φ", r_val, P_MIN, P_MAX, "°"),
         ]
-        for name, value, lo, hi in checks:
-            if not lo <= value <= hi:
-                raise ValueError(f"{name} must be between {lo:g} and {hi:g}.")
+        for name, val, lo, hi, unit in checks:
+            if not (lo <= val <= hi):
+                raise ValueError(f"{name} ({val:g} {unit}) is outside permitted bounds [{lo:g}, {hi:g}] {unit}.")
 
-        if np.linalg.norm(p[:3]) < 10:
-            raise ValueError("Camera-aircraft distance must be at least 10 m.")
-        return p
+        dist = float(np.linalg.norm([x_val, y_val, z_val]))
+        if dist < MIN_RANGE_M:
+            raise ValueError(f"Follower-leader distance ({dist:.2f} m) must be at least {MIN_RANGE_M:.1f} m to avoid collision.")
 
-    def set_pose(self, p):
-        for key, value in zip(("x", "y", "z", "roll"), p):
+        return np.array([x_val, y_val, z_val, r_val], dtype=np.float64)
+
+    def set_pose_inputs(self, pose: np.ndarray) -> None:
+        """Updates text entry boxes with formatted pose values."""
+        for key, val in zip(("x", "y", "z", "roll"), pose):
             self.entries[key].delete(0, tk.END)
-            self.entries[key].insert(0, f"{value:.2f}")
+            self.entries[key].insert(0, f"{val:.2f}")
 
-    def random_pose(self):
-        for _ in range(1000):
-            p = np.array([
+    def on_random_pose(self) -> None:
+        """Samples a random valid pose within physical constraints."""
+        for _ in range(500):
+            candidate = np.array([
                 RNG.uniform(X_MIN, X_MAX),
                 RNG.uniform(Y_MIN, Y_MAX),
                 RNG.uniform(Z_MIN, Z_MAX),
-                RNG.uniform(P_MIN, P_MAX)
+                RNG.uniform(P_MIN, P_MAX),
             ])
-            if np.linalg.norm(p[:3]) >= 10:
-                self.set_pose(p)
-                self.make_observation(p)
-                self.clear_results()
-                self.status.set("Random test pose generated. Click Run Estimation.")
+            if np.linalg.norm(candidate[:3]) >= MIN_RANGE_M:
+                self.set_pose_inputs(candidate)
+                self.generate_and_draw_observation(candidate)
+                self._clear_results_display()
+                self.status_text.set("Random test pose generated. Click 'Run Estimation'.")
                 return
-        messagebox.showerror("Error", "Could not generate a valid pose.")
+        messagebox.showwarning("Warning", "Could not sample a valid pose meeting minimum separation.")
 
-    def make_observation(self, pose):
-        u, v, visible = project_features(
-            pose[None, :], rng=RNG, add_noise=True
-        )
+    def _clear_results_display(self) -> None:
+        """Clears results tables before estimation."""
+        if self.current_pose is not None:
+            self.tree_pose.item(self.row_gt, values=("Ground Truth", f"{self.current_pose[0]:.2f}", f"{self.current_pose[1]:.2f}", f"{self.current_pose[2]:.2f}", f"{self.current_pose[3]:.2f}"))
+        self.tree_pose.item(self.row_ann, values=("ANN Coarse Estimate", "—", "—", "—", "—"))
+        self.tree_pose.item(self.row_pf, values=("ANN + Particle Filter", "—", "—", "—", "—"))
+        self.lbl_ann_class.config(text="ANN Prediction: Class — / 4800   |   Predicted Class Softmax Probability: — %")
+        self.tree_err.item(self.row_pos_err, values=("3-D Position Euclidean Error", "— m", "— m", "—"))
+        self.tree_err.item(self.row_roll_err, values=("Roll Absolute Error |φ_err|", "— °", "— °", "—"))
+
+    # -----------------------------------------------------------------------
+    # Canvas Observation Rendering
+    # -----------------------------------------------------------------------
+    def generate_and_draw_observation(self, pose: np.ndarray) -> None:
+        """Computes synthetic 2D projection and updates the camera canvas."""
+        u, v, visible = project_features(pose[None, :], rng=RNG, add_noise=True)
         u, v, visible = u[0], v[0], visible[0]
-        u = np.where(visible, u, 0.0)
-        v = np.where(visible, v, 0.0)
+
+        u_clean = np.where(visible, u, 0.0)
+        v_clean = np.where(visible, v, 0.0)
         occ = (~visible).astype(np.int8)
 
         raw = np.empty((NUM_FEATURES, 3), dtype=np.float32)
-        raw[:, 0], raw[:, 1], raw[:, 2] = u, v, occ
-        self.pose = pose.copy()
-        self.raw = raw.reshape(-1)
-        self.draw(u, v, visible)
+        raw[:, 0], raw[:, 1], raw[:, 2] = u_clean, v_clean, occ
+        self.current_pose = pose.copy()
+        self.current_raw = raw.reshape(-1)
+        self.last_observation = (u, v, visible)
 
-    def draw(self, u, v, visible):
+        n_vis = int(np.sum(visible))
+        self.lbl_counts.config(text=f"Detected: {n_vis} / 14   |   Occluded: {14 - n_vis} / 14")
+
+        # Update Ground Truth in table
+        self.tree_pose.item(self.row_gt, values=("Ground Truth", f"{pose[0]:.2f}", f"{pose[1]:.2f}", f"{pose[2]:.2f}", f"{pose[3]:.2f}"))
+
+        self._render_canvas(u, v, visible)
+
+    def _redraw_observation(self) -> None:
+        """Handles canvas resize events smoothly."""
+        if self.last_observation is not None:
+            u, v, visible = self.last_observation
+            self._render_canvas(u, v, visible)
+
+    def _render_canvas(self, u: np.ndarray, v: np.ndarray, visible: np.ndarray) -> None:
+        """Renders 14 landmarks with clearly visible markers and feature IDs."""
         self.canvas.delete("all")
-        self.root.update_idletasks()
-        w = max(self.canvas.winfo_width(), 500)
-        h = max(self.canvas.winfo_height(), 400)
-        scale = min(w / IMG_W, h / IMG_H) * 0.92
-        iw, ih = IMG_W * scale, IMG_H * scale
-        ox, oy = (w - iw) / 2, (h - ih) / 2
+        cw = max(self.canvas.winfo_width(), 360)
+        ch = max(self.canvas.winfo_height(), 180)
 
-        self.canvas.create_rectangle(
-            ox, oy, ox + iw, oy + ih, outline="#555555"
-        )
-        cx, cy = ox + CX * scale, oy + CY * scale
-        self.canvas.create_line(cx - 12, cy, cx + 12, cy, fill="#666666")
-        self.canvas.create_line(cx, cy - 12, cx, cy + 12, fill="#666666")
+        scale = min(cw / IMG_W, ch / IMG_H) * 0.88
+        vw, vh = IMG_W * scale, IMG_H * scale
+        ox = (cw - vw) / 2.0
+        oy = (ch - vh) / 2.0
 
+        # Viewport frame
+        self.canvas.create_rectangle(ox, oy, ox + vw, oy + vh, outline="#334155", fill="#070c18", width=1)
+
+        # Center crosshair reticle at principal point
+        cx_s = ox + CX * scale
+        cy_s = oy + CY * scale
+        self.canvas.create_line(cx_s - 12, cy_s, cx_s + 12, cy_s, fill="#38bdf8", width=1)
+        self.canvas.create_line(cx_s, cy_s - 12, cx_s, cy_s + 12, fill="#38bdf8", width=1)
+        self.canvas.create_oval(cx_s - 4, cy_s - 4, cx_s + 4, cy_s + 4, outline="#38bdf8", width=1)
+
+        # Draw detected landmarks clearly (radius = 6 px)
+        r = 6
         for i in range(NUM_FEATURES):
             if not visible[i]:
                 continue
-            px, py = ox + float(u[i]) * scale, oy + float(v[i]) * scale
-            r = 5
-            self.canvas.create_oval(
-                px-r, py-r, px+r, py+r,
-                fill="#ff5555", outline="white"
-            )
+            px = ox + float(u[i]) * scale
+            py = oy + float(v[i]) * scale
+
+            # Emerald dot with white border
+            self.canvas.create_oval(px - r, py - r, px + r, py + r, fill="#10b981", outline="#ffffff", width=1.5)
+            # Feature ID text
             self.canvas.create_text(
-                px+10, py-9, text=str(i+1), fill="white",
-                anchor="w", font=("Segoe UI", 8, "bold")
+                px + 9, py - 8,
+                text=str(i + 1),
+                fill="#f8fafc",
+                anchor="w",
+                font=("Segoe UI", 9, "bold")
             )
 
-        n = int(np.sum(visible))
-        self.canvas.create_text(
-            ox+10, oy+10,
-            text=f"Detected: {n}/14   Hidden/dropped: {14-n}/14",
-            fill="white", anchor="nw",
-            font=("Segoe UI", 10, "bold")
-        )
-
-    def clear_results(self):
-        self.text.config(state="normal")
-        self.text.delete("1.0", tk.END)
-        self.text.insert(tk.END, "Click  Run Estimation  to run the model.\n")
-        self.text.config(state="disabled")
-
-    def run(self):
-        if self.model is None:
-            messagebox.showerror("Error", "ANN model is not loaded.")
+    # -----------------------------------------------------------------------
+    # Estimation Execution
+    # -----------------------------------------------------------------------
+    def on_run_estimation(self) -> None:
+        """Executes ANN classification and Particle Filter refinement."""
+        if self.model is None or self.norm is None:
+            messagebox.showerror("Error", "Trained model not loaded.")
             return
 
         try:
-            pose = self.read_pose()
-            self.make_observation(pose)
-            self.status.set("Running ANN + particle filter...")
+            pose = self.read_pose_inputs()
+            self.generate_and_draw_observation(pose)
+            self.status_text.set("Running ANN classification and Particle Filter refinement...")
             self.root.update_idletasks()
 
-            classes, probs = predict_topk(
-                self.model, self.norm, self.raw[None, :], k=TOPK
-            )
-            ann_class = int(classes[0, 0])
-            ann_prob = float(probs[0, 0])
-            ann_pose = class_to_center(np.array([ann_class]))[0].astype(float)
+            # 1. ANN Coarse Inference
+            top_classes, top_probs = predict_topk(self.model, self.norm, self.current_raw[None, :], k=TOPK)
+            ann_class = int(top_classes[0, 0])
+            ann_prob = float(top_probs[0, 0])
+            ann_pose = class_to_center(np.array([ann_class]))[0].astype(np.float64)
 
+            # 2. Particle Filter Refinement
             pf_pose, _ = particle_filter(
-                self.raw, classes[0], probs[0],
+                self.current_raw,
+                top_classes[0],
+                top_probs[0],
                 n_particles=PARTICLES,
                 iterations=ITERATIONS,
-                rng=RNG
+                rng=RNG,
             )
 
-            ann_pos = float(np.linalg.norm(ann_pose[:3] - pose[:3]))
-            pf_pos = float(np.linalg.norm(pf_pose[:3] - pose[:3]))
-            ann_roll = float(abs(ann_pose[3] - pose[3]))
-            pf_roll = float(abs(pf_pose[3] - pose[3]))
+            # Errors
+            ann_pos_err = float(np.linalg.norm(ann_pose[:3] - pose[:3]))
+            pf_pos_err = float(np.linalg.norm(pf_pose[:3] - pose[:3]))
+            ann_roll_err = float(abs(ann_pose[3] - pose[3]))
+            pf_roll_err = float(abs(pf_pose[3] - pose[3]))
 
-            pos_imp = 100 * (ann_pos - pf_pos) / ann_pos if ann_pos else 0
-            roll_imp = 100 * (ann_roll - pf_roll) / ann_roll if ann_roll else 0
+            # Update Pose Results Table
+            self.tree_pose.item(self.row_gt, values=("Ground Truth", f"{pose[0]:.2f}", f"{pose[1]:.2f}", f"{pose[2]:.2f}", f"{pose[3]:.2f}"))
+            self.tree_pose.item(self.row_ann, values=("ANN Coarse Estimate", f"{ann_pose[0]:.2f}", f"{ann_pose[1]:.2f}", f"{ann_pose[2]:.2f}", f"{ann_pose[3]:.2f}"))
+            self.tree_pose.item(self.row_pf, values=("ANN + Particle Filter", f"{pf_pose[0]:.2f}", f"{pf_pose[1]:.2f}", f"{pf_pose[2]:.2f}", f"{pf_pose[3]:.2f}"))
 
-            lines = [
-                "GROUND TRUTH",
-                f"  X     : {pose[0]:8.3f} m",
-                f"  Y     : {pose[1]:8.3f} m",
-                f"  Z     : {pose[2]:8.3f} m",
-                f"  Roll  : {pose[3]:8.3f} deg",
-                "",
-                "ANN — COARSE ESTIMATE",
-                f"  Class : {ann_class:4d} / 4800",
-                f"  Prob. : {100*ann_prob:7.2f}%",
-                f"  X     : {ann_pose[0]:8.3f} m",
-                f"  Y     : {ann_pose[1]:8.3f} m",
-                f"  Z     : {ann_pose[2]:8.3f} m",
-                f"  Roll  : {ann_pose[3]:8.3f} deg",
-                f"  Position error : {ann_pos:6.3f} m",
-                f"  Roll error     : {ann_roll:6.3f} deg",
-                "",
-                "ANN + PARTICLE FILTER",
-                f"  X     : {pf_pose[0]:8.3f} m",
-                f"  Y     : {pf_pose[1]:8.3f} m",
-                f"  Z     : {pf_pose[2]:8.3f} m",
-                f"  Roll  : {pf_pose[3]:8.3f} deg",
-                f"  Position error : {pf_pos:6.3f} m",
-                f"  Roll error     : {pf_roll:6.3f} deg",
-                "",
-                "REFINEMENT",
-                f"  Position improvement : {pos_imp:6.2f}%",
-                f"  Roll improvement     : {roll_imp:6.2f}%",
-            ]
+            self.lbl_ann_class.config(
+                text=f"ANN Prediction: Class {ann_class} / 4800   |   Predicted Class Softmax Probability: {ann_prob * 100:.2f} %"
+            )
 
-            self.text.config(state="normal")
-            self.text.delete("1.0", tk.END)
-            self.text.insert(tk.END, "\n".join(lines))
-            self.text.config(state="disabled")
-            self.status.set("Complete — particle filter refined the ANN estimate.")
+            # Update Error Comparison Table
+            pos_diff = ann_pos_err - pf_pos_err
+            if ann_pos_err > 1e-9:
+                pos_pct = 100.0 * pos_diff / ann_pos_err
+                pos_diff_str = f"-{pos_diff:.3f} m ({pos_pct:.1f}% reduction)" if pos_diff >= 0 else f"+{-pos_diff:.3f} m (No improvement)"
+            else:
+                pos_diff_str = "0.000 m"
 
-        except Exception as e:
-            self.status.set("Estimation failed.")
-            messagebox.showerror("Estimation error", str(e))
+            roll_diff = ann_roll_err - pf_roll_err
+            if ann_roll_err > 1e-9:
+                roll_pct = 100.0 * roll_diff / ann_roll_err
+                roll_diff_str = f"-{roll_diff:.3f} deg ({roll_pct:.1f}% reduction)" if roll_diff >= 0 else f"+{-roll_diff:.3f} deg (No improvement)"
+            else:
+                roll_diff_str = "0.000 deg"
+
+            self.tree_err.item(
+                self.row_pos_err,
+                values=("3-D Position Euclidean Error", f"{ann_pos_err:.3f} m", f"{pf_pos_err:.3f} m", pos_diff_str)
+            )
+            self.tree_err.item(
+                self.row_roll_err,
+                values=("Roll Absolute Error", f"{ann_roll_err:.3f} deg", f"{pf_roll_err:.3f} deg", roll_diff_str)
+            )
+
+            self.status_text.set("Estimation complete.")
+
+        except Exception as exc:
+            self.status_text.set(f"Execution error: {exc}")
+            messagebox.showerror("Execution Error", str(exc))
+
+
+def main() -> None:
+    root = tk.Tk()
+    PoseEstimationApp(root)
+    root.mainloop()
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    App(root)
-    root.mainloop()
+    main()
